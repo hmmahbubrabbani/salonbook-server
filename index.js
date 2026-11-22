@@ -296,11 +296,11 @@ const upload = multer({
 // ---------------------------------------------------------------------------
 const app = express();
 
-app.get('/health', (_req, res) => {
+app.get('/health', (_req, res) =>{
   res.status(200).json({ status: 'ok', service: 'salonbook-api' });
 });
 
-const allowedOrigins = new Set(['http://localhost:3000', CLIENT_URL]);
+const allowedOrigins = new Set([CLIENT_URL]);
 app.use(
   cors({
     origin(origin, callback) {
