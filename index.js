@@ -112,7 +112,7 @@ async function initDatabase(){
 // ---------------------------------------------------------------------------
 // 3. Helper Functions & Middlewares
 // ---------------------------------------------------------------------------
-function cookieOptions() {
+function cookieOptions(){
   const isProd = NODE_ENV === 'production';
   return {
     httpOnly: true,
@@ -123,7 +123,7 @@ function cookieOptions() {
   };
 }
 
-function issueTokenCookie(res, user) {
+function issueTokenCookie(res, user){
   const token = jwt.sign(
     { userId: String(user._id), email: user.email, role: user.role || 'client' },
     JWT_SECRET,
@@ -133,7 +133,7 @@ function issueTokenCookie(res, user) {
   return token;
 }
 
-function formatSafeUser(userDoc) {
+function formatSafeUser(userDoc){
   return {
     _id: userDoc._id.toHexString(),
     name: userDoc.name,
@@ -145,7 +145,7 @@ function formatSafeUser(userDoc) {
   };
 }
 
-function validatePassword(password) {
+function validatePassword(password){
   if (typeof password !== 'string' || password.length < 6) {
     return 'Password must be at least 6 characters long.';
   }
@@ -158,7 +158,7 @@ function validatePassword(password) {
   return null;
 }
 
-async function resolveBetterAuthUserFromCookieHeader(cookieHeader) {
+async function resolveBetterAuthUserFromCookieHeader(cookieHeader){
   if (!cookieHeader) return null;
   try {
     const res = await fetch(`${CLIENT_URL}/api/auth/get-session`, {
