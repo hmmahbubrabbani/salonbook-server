@@ -13,10 +13,18 @@ import { MongoClient, ObjectId } from 'mongodb';
 // ---------------------------------------------------------------------------
 const PORT = Number(process.env.PORT) || 5000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
-const CLIENT_URL = (process.env.CLIENT_URL || '').trim().replace(/\/$/, '');
+const CLIENT_URL = (
+  process.env.CLIENT_URL || 'https://salonbook-frontend-opal.vercel.app'
+)
+  .trim()
+  .replace(/\/$/, '');
 const MONGODB_URI = (process.env.MONGODB_URI || '').trim();
 const MONGODB_DB_NAME = (process.env.MONGODB_DB_NAME || 'salonbook').trim();
-const JWT_SECRET = (process.env.BETTER_AUTH_SECRET || process.env.JWT_ACCESS_SECRET || '').trim();
+const JWT_SECRET = (
+  process.env.BETTER_AUTH_SECRET ||
+  process.env.JWT_ACCESS_SECRET ||
+  ''
+).trim();
 const STRIPE_SECRET_KEY = (process.env.STRIPE_SECRET_KEY || '').trim();
 const STRIPE_WEBHOOK_SECRET = (process.env.STRIPE_WEBHOOK_SECRET || '').trim();
 const IMGBB_API_KEY = (process.env.IMGBB_API_KEY || '').trim();
@@ -35,7 +43,9 @@ if (!MONGODB_URI) {
 }
 
 if (!JWT_SECRET || JWT_SECRET.length < 16) {
-  console.error('[SalonBook] Missing or too short JWT_ACCESS_SECRET (minimum 16 characters).');
+  console.error(
+    '[SalonBook] Missing or too short JWT_ACCESS_SECRET (minimum 16 characters).'
+  );
   process.exit(1);
 }
 
@@ -188,14 +198,18 @@ async function resolveBetterAuthUserFromCookieHeader(cookieHeader) {
       },
       cache: 'no-store',
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.warn('[SalonBook] get-session returned status:', res.status);
+      return null;
+    }
     const data = await res.json().catch(() => null);
     const email = String(data?.user?.email || '').toLowerCase().trim();
     if (!email) return null;
 
     const { users } = cols();
     return users.findOne({ email }, { projection: { passwordHash: 0, password: 0 } });
-  } catch {
+  } catch (err) {
+    console.warn('[SalonBook] Failed to resolve Better Auth session:', err);
     return null;
   }
 }
@@ -559,7 +573,34 @@ app.post('/api/v1/auth/sync-session', async (req, res, next) => {
       });
     }
 
-    const safeUser = formatSafeUser(userDoc);
+    const { name, avatarUrl } = req.body || {};
+    const trimmedName = String(name || '').trim();
+    const trimmedAvatar = String(avatarUrl || '').trim();
+    const profileUpdates = {};
+
+    if (trimmedName && trimmedName !== userDoc.name) {
+      profileUpdates.name = trimmedName;
+    }
+    if (trimmedAvatar && trimmedAvatar !== (userDoc.avatarUrl || userDoc.image || '')) {
+      profileUpdates.avatarUrl = trimmedAvatar;
+      profileUpdates.image = trimmedAvatar;
+    }
+
+    let finalDoc = userDoc;
+    if (Object.keys(profileUpdates).length > 0) {
+      profileUpdates.updatedAt = new Date().toISOString();
+      const { users } = cols();
+      const updatedDoc = await users.findOneAndUpdate(
+        { _id: userDoc._id },
+        { $set: profileUpdates },
+        { returnDocument: 'after', projection: { passwordHash: 0, password: 0 } }
+      );
+      if (updatedDoc) {
+        finalDoc = updatedDoc;
+      }
+    }
+
+    const safeUser = formatSafeUser(finalDoc);
     const token = issueTokenCookie(res, safeUser);
     return res.status(200).json({ success: true, token, user: safeUser });
   } catch (err) {
