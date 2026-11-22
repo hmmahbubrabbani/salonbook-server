@@ -181,7 +181,7 @@ async function resolveBetterAuthUserFromCookieHeader(cookieHeader){
   }
 }
 
-async function requireAuth(req, res, next) {
+async function requireAuth(req, res, next){
   try {
     const token =
       req.cookies?.salonbook_token ||
@@ -208,7 +208,7 @@ async function requireAuth(req, res, next) {
       return res.status(401).json({ success: false, message: 'User account not found.' });
     }
 
-    if (userDoc.isBlocked) {
+    if (userDoc.isBlocked){
       return res.status(403).json({
         success: false,
         code: 'USER_BLOCKED',
@@ -223,7 +223,7 @@ async function requireAuth(req, res, next) {
   }
 }
 
-function requireRole(...allowedRoles) {
+function requireRole(...allowedRoles){
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ success: false, message: 'Authentication required.' });
@@ -241,7 +241,7 @@ function requireRole(...allowedRoles) {
   };
 }
 
-async function recordVerifiedPayment(session) {
+async function recordVerifiedPayment(session){
   const appointmentId = session.metadata?.appointmentId;
   if (!appointmentId || !ObjectId.isValid(appointmentId)) return null;
 
