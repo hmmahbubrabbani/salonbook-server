@@ -1036,7 +1036,7 @@ app.get('/api/v1/transactions', requireAuth, requireRole('admin'), async (_req, 
 // ---------------------------------------------------------------------------
 // 9. Admin User Management & ImgBB Upload Routes
 // ---------------------------------------------------------------------------
-app.get('/api/v1/users', requireAuth, requireRole('admin'), async (_req, res, next) => {
+app.get('/api/v1/users', requireAuth, requireRole('admin'), async (_req, res, next) =>{
   try {
     const { users } = cols();
     const list = await users
@@ -1049,7 +1049,7 @@ app.get('/api/v1/users', requireAuth, requireRole('admin'), async (_req, res, ne
   }
 });
 
-app.patch('/api/v1/users/:id/block', requireAuth, requireRole('admin'), async (req, res, next) => {
+app.patch('/api/v1/users/:id/block', requireAuth, requireRole('admin'), async (req, res, next) =>{
   try {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) {
@@ -1059,7 +1059,7 @@ app.patch('/api/v1/users/:id/block', requireAuth, requireRole('admin'), async (r
     const { users } = cols();
     const updated = await users.findOneAndUpdate(
       { _id: new ObjectId(id), role: { $ne: 'admin' } },
-      { $set: { isBlocked: Boolean(req.body?.isBlocked), updatedAt: new Date().toISOString() } },
+      { $set: { isBlocked: Boolean(req.body?.isBlocked), updatedAt: new Date().toISOString() }},
       { returnDocument: 'after', projection: { passwordHash: 0, password: 0 } }
     );
 
@@ -1073,7 +1073,7 @@ app.patch('/api/v1/users/:id/block', requireAuth, requireRole('admin'), async (r
   }
 });
 
-app.post('/api/v1/upload', upload.single('image'), async (req, res, next) => {
+app.post('/api/v1/upload', upload.single('image'), async (req, res, next) =>{
   try {
     if (!IMGBB_API_KEY) {
       return res.status(500).json({ success: false, message: 'IMGBB_API_KEY is not set.' });
@@ -1086,13 +1086,13 @@ app.post('/api/v1/upload', upload.single('image'), async (req, res, next) => {
     params.append('key', IMGBB_API_KEY);
     params.append('image', req.file.buffer.toString('base64'));
 
-    const response = await fetch('https://api.imgbb.com/1/upload', {
+    const response = await fetch('https://api.imgbb.com/1/upload',{
       method: 'POST',
       body: params,
     });
     const data = await response.json();
 
-    if (!response.ok || !data?.success || !data?.data?.display_url) {
+    if (!response.ok || !data?.success || !data?.data?.display_url){
       return res.status(502).json({ success: false, message: 'ImgBB image upload failed.' });
     }
 
