@@ -320,9 +320,9 @@ app.use(
 app.post(
   '/api/v1/payments/webhook',
   express.raw({ type: 'application/json' }),
-  async (req, res) => {
+  async (req, res) =>{
     if (!stripe || !STRIPE_WEBHOOK_SECRET) {
-      return res.status(500).json({ error: 'Stripe webhook is not configured.' });
+      return res.status(500).json({ error: 'Stripe webhook is not configured.'});
     }
 
     const sig = req.headers['stripe-signature'];
@@ -352,7 +352,7 @@ app.post(
   }
 );
 
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '2mb'}));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
