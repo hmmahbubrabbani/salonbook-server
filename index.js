@@ -921,14 +921,14 @@ app.patch('/api/v1/appointments/:id', requireAuth, async (req, res, next) =>{
 // ---------------------------------------------------------------------------
 // 8. Stripe Checkout, Verification & Transactions Routes
 // ---------------------------------------------------------------------------
-app.post('/api/v1/payments/checkout', requireAuth, requireRole('client'), async (req, res, next) => {
+app.post('/api/v1/payments/checkout', requireAuth, requireRole('client'), async (req, res, next) =>{
   try {
     if (!stripe) {
       return res.status(500).json({ success: false, message: 'Stripe is not configured.' });
     }
 
     const { appointmentId } = req.body || {};
-    if (!appointmentId || !ObjectId.isValid(appointmentId)) {
+    if (!appointmentId || !ObjectId.isValid(appointmentId)){
       return res.status(400).json({ success: false, message: 'Invalid appointment ID.' });
     }
 
@@ -940,18 +940,18 @@ app.post('/api/v1/payments/checkout', requireAuth, requireRole('client'), async 
       return res.status(404).json({ success: false, message: 'Appointment not found.' });
     }
 
-    if (appointment.clientId !== req.user._id) {
+    if (appointment.clientId !== req.user._id){
       return res.status(403).json({ success: false, message: 'Forbidden.' });
     }
 
-    if (appointment.status !== 'Confirmed') {
+    if (appointment.status !== 'Confirmed'){
       return res.status(400).json({
         success: false,
         message: 'Only Confirmed appointments can be paid.',
       });
     }
 
-    if (appointment.paymentStatus === 'Paid') {
+    if (appointment.paymentStatus === 'Paid'){
       return res.status(400).json({
         success: false,
         message: 'This appointment is already paid.',
@@ -1000,7 +1000,7 @@ app.post('/api/v1/payments/checkout', requireAuth, requireRole('client'), async 
   }
 });
 
-app.get('/api/v1/payments/verify', requireAuth, async (req, res, next) => {
+app.get('/api/v1/payments/verify', requireAuth, async (req, res, next) =>{
   try {
     if (!stripe) {
       return res.status(500).json({ success: false, message: 'Stripe is not configured.' });
@@ -1023,7 +1023,7 @@ app.get('/api/v1/payments/verify', requireAuth, async (req, res, next) => {
   }
 });
 
-app.get('/api/v1/transactions', requireAuth, requireRole('admin'), async (_req, res, next) => {
+app.get('/api/v1/transactions', requireAuth, requireRole('admin'), async (_req, res, next) =>{
   try {
     const { transactions } = cols();
     const list = await transactions.find({}).sort({ createdAt: -1 }).toArray();
