@@ -11,26 +11,35 @@ import { MongoClient, ObjectId } from 'mongodb';
 // ---------------------------------------------------------------------------
 // 1. Environment Configuration & Startup Guard
 // ---------------------------------------------------------------------------
-const PORT = Number(process.env.PORT);
+// ---------------------------------------------------------------------------
+// 1. Environment Configuration & Startup Guard (salonbook-server)
+// ---------------------------------------------------------------------------
+const PORT = Number(process.env.PORT) || 5000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
-const CLIENT_URL = (process.env.CLIENT_URL);
-const MONGODB_URI = process.env.MONGODB_URI;
-const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || 'salonbook';
-const JWT_SECRET = process.env.JWT_ACCESS_SECRET || process.env.BETTER_AUTH_SECRET;
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
-const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
-const IMGBB_API_KEY = process.env.IMGBB_API_KEY || '';
+const CLIENT_URL = (process.env.CLIENT_URL || '').trim().replace(/\/$/, '');
+const MONGODB_URI = (process.env.MONGODB_URI || '').trim();
+const MONGODB_DB_NAME = (process.env.MONGODB_DB_NAME || 'salonbook').trim();
+const JWT_SECRET = (process.env.JWT_ACCESS_SECRET || process.env.BETTER_AUTH_SECRET || '').trim();
+const STRIPE_SECRET_KEY = (process.env.STRIPE_SECRET_KEY || '').trim();
+const STRIPE_WEBHOOK_SECRET = (process.env.STRIPE_WEBHOOK_SECRET || '').trim();
+const IMGBB_API_KEY = (process.env.IMGBB_API_KEY || '').trim();
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').toLowerCase().trim();
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
-const ADMIN_NAME = process.env.ADMIN_NAME;
+const ADMIN_NAME = (process.env.ADMIN_NAME || 'SalonBook Admin').trim();
+
+// Startup Validation (প্রয়োজনীয় ভেরিয়েবল না থাকলে সার্ভার শুরু হওয়ার আগেই থামাবে)
+if (!CLIENT_URL) {
+  console.error('[SalonBook] Missing CLIENT_URL in environment variables.');
+  process.exit(1);
+}
 
 if (!MONGODB_URI) {
   console.error('[SalonBook] Missing MONGODB_URI in environment variables.');
   process.exit(1);
 }
 
-if (!JWT_SECRET) {
-  console.error('[SalonBook] Missing JWT_ACCESS_SECRET (or BETTER_AUTH_SECRET) in environment.');
+if (!JWT_SECRET || JWT_SECRET.length < 16) {
+  console.error('[SalonBook] Missing or too short JWT_ACCESS_SECRET (minimum 16 characters).');
   process.exit(1);
 }
 
@@ -1123,7 +1132,7 @@ app.use((err, _req, res, _next) =>{
 initDatabase()
   .then(() => {
     app.listen(PORT, () => {
-      console.log(`[SalonBook] Express server listening on http://localhost:${PORT}`);
+      console.log(`[SalonBook] Express server listening on port ${PORT} (${NODE_ENV})`);
     });
   })
   .catch((err) => {
