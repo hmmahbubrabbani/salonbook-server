@@ -359,13 +359,13 @@ app.use(cookieParser());
 // ---------------------------------------------------------------------------
 // 5. Authentication & Profile Routes
 // ---------------------------------------------------------------------------
-app.post('/api/v1/auth/register', async (req, res, next) => {
+app.post('/api/v1/auth/register', async(req, res, next) =>{
   try {
     const { name, email, password, avatarUrl, image, phone } = req.body || {};
     const normalizedEmail = String(email || '').toLowerCase().trim();
     const resolvedAvatar = String(avatarUrl || image || '').trim();
 
-    if (!String(name || '').trim() || !normalizedEmail || !password) {
+    if (!String(name || '').trim() || !normalizedEmail || !password){
       return res.status(400).json({
         success: false,
         message: 'Full name, email, and password are required.',
