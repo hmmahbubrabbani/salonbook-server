@@ -780,7 +780,7 @@ app.delete('/api/v1/services/:id', requireAuth, requireRole('admin'), async (req
 // ---------------------------------------------------------------------------
 // 7. Appointments Routes
 // ---------------------------------------------------------------------------
-app.get('/api/v1/appointments', requireAuth, async (req, res, next) => {
+app.get('/api/v1/appointments', requireAuth, async (req, res, next) =>{
   try {
     const { appointments } = cols();
     const filter = req.user.role === 'admin' ? {} : { clientId: req.user._id };
@@ -791,13 +791,13 @@ app.get('/api/v1/appointments', requireAuth, async (req, res, next) => {
   }
 });
 
-app.post('/api/v1/appointments', requireAuth, requireRole('client'), async (req, res, next) => {
+app.post('/api/v1/appointments', requireAuth, requireRole('client'), async (req, res, next) =>{
   try {
     const { serviceId, date, startTime, message } = req.body || {};
     const trimmedDate = String(date || '').trim();
     const trimmedSlot = String(startTime || '').trim();
 
-    if (!serviceId || !ObjectId.isValid(serviceId) || !trimmedDate || !trimmedSlot) {
+    if (!serviceId || !ObjectId.isValid(serviceId) || !trimmedDate || !trimmedSlot){
       return res.status(400).json({
         success: false,
         message: 'Service ID, appointment date, and time slot are required.',
@@ -810,7 +810,7 @@ app.post('/api/v1/appointments', requireAuth, requireRole('client'), async (req,
       return res.status(404).json({ success: false, message: 'Service not found.' });
     }
 
-    if (!service.isActive) {
+    if (!service.isActive){
       return res.status(400).json({
         success: false,
         message: 'Inactive services are not available for booking.',
@@ -823,7 +823,7 @@ app.post('/api/v1/appointments', requireAuth, requireRole('client'), async (req,
       status: { $in: ['Pending', 'Confirmed'] },
     });
 
-    if (conflict) {
+    if (conflict){
       return res.status(409).json({
         success: false,
         message: `Slot ${trimmedSlot} on ${trimmedDate} is already booked.`,
@@ -859,7 +859,7 @@ app.post('/api/v1/appointments', requireAuth, requireRole('client'), async (req,
   }
 });
 
-app.patch('/api/v1/appointments/:id', requireAuth, async (req, res, next) => {
+app.patch('/api/v1/appointments/:id', requireAuth, async (req, res, next) =>{
   try {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) {
