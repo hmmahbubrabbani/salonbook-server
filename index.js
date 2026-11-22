@@ -439,7 +439,7 @@ app.post('/api/v1/auth/register', async(req, res, next) =>{
   }
 });
 
-app.post('/api/v1/auth/login', async (req, res, next) => {
+app.post('/api/v1/auth/login', async (req, res, next) =>{
   try {
     const { email, password } = req.body || {};
     const normalizedEmail = String(email || '').toLowerCase().trim();
@@ -457,7 +457,7 @@ app.post('/api/v1/auth/login', async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
 
-    if (userDoc.isBlocked) {
+    if (userDoc.isBlocked){
       return res.status(403).json({
         success: false,
         message: 'Your account is blocked. Please contact SalonBook support.',
