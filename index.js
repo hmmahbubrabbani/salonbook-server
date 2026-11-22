@@ -21,8 +21,8 @@ const CLIENT_URL = (
 const MONGODB_URI = (process.env.MONGODB_URI || '').trim();
 const MONGODB_DB_NAME = (process.env.MONGODB_DB_NAME || 'salonbook').trim();
 const JWT_SECRET = (
-  process.env.BETTER_AUTH_SECRET ||
   process.env.JWT_ACCESS_SECRET ||
+  process.env.BETTER_AUTH_SECRET ||
   ''
 ).trim();
 const STRIPE_SECRET_KEY = (process.env.STRIPE_SECRET_KEY || '').trim();
@@ -93,7 +93,7 @@ async function initDatabase() {
   await mongoClient.connect();
   db = mongoClient.db(MONGODB_DB_NAME);
 
-  const { users, services, appointments, transactions } = cols();
+  const { users, accounts, services, appointments, transactions } = cols();
   await Promise.all([
     ensureIndexSafe(users, { email: 1 }, { unique: true }),
     ensureIndexSafe(services, { isActive: 1 }),
@@ -106,7 +106,7 @@ async function initDatabase() {
     if (!existingAdmin) {
       const now = new Date().toISOString();
       const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 12);
-      await users.insertOne({
+      const adminResult = await users.insertOne({
         name: ADMIN_NAME,
         email: ADMIN_EMAIL,
         passwordHash,
@@ -119,6 +119,21 @@ async function initDatabase() {
         createdAt: now,
         updatedAt: now,
       });
+      // Better Auth sign-in/email validates against this credential account,
+      // keyed by user id (see the register route).
+      await accounts.updateOne(
+        { providerId: 'credential', accountId: adminResult.insertedId.toHexString() },
+        {
+          $setOnInsert: {
+            userId: adminResult.insertedId,
+            accountId: adminResult.insertedId.toHexString(),
+            providerId: 'credential',
+            password: passwordHash,
+            createdAt: now,
+          },
+        },
+        { upsert: true }
+      );
       console.log(`[SalonBook] Seeded admin account: ${ADMIN_EMAIL}`);
     }
   }
@@ -142,22 +157,35 @@ async function ensureDatabaseReady() {
 // 3. Helper Functions & Middlewares
 // ---------------------------------------------------------------------------
 function cookieOptions() {
-  const isHttps = NODE_ENV === 'production' || CLIENT_URL.startsWith('https://');
+  const isCrossSiteHttps =
+    process.env.VERCEL === '1' ||
+    NODE_ENV === 'production' ||
+    CLIENT_URL.startsWith('https://');
+
   return {
     httpOnly: true,
-    secure: isHttps,
-    sameSite: isHttps ? 'none' : 'lax',
+    secure: isCrossSiteHttps,
+    sameSite: isCrossSiteHttps ? 'none' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000,
     path: '/',
   };
 }
 
-function issueTokenCookie(res, user) {
-  const token = jwt.sign(
-    { userId: String(user._id), email: user.email, role: user.role || 'client' },
+function signAuthToken(user) {
+  return jwt.sign(
+    {
+      userId: String(user._id),
+      email: user.email,
+      role: user.role || 'client',
+    },
     JWT_SECRET,
     { expiresIn: '7d' }
   );
+}
+
+function issueTokenCookie(res, user) {
+  const token = signAuthToken(user);
+  
   res.cookie('salonbook_token', token, cookieOptions());
   return token;
 }
@@ -199,7 +227,6 @@ async function resolveBetterAuthUserFromCookieHeader(cookieHeader) {
       cache: 'no-store',
     });
     if (!res.ok) {
-      console.warn('[SalonBook] get-session returned status:', res.status);
       return null;
     }
     const data = await res.json().catch(() => null);
@@ -216,41 +243,63 @@ async function resolveBetterAuthUserFromCookieHeader(cookieHeader) {
 
 async function requireAuth(req, res, next) {
   try {
+    const authHeader = req.headers.authorization || '';
+    const bearerToken = authHeader.startsWith('Bearer ')
+      ? authHeader.slice(7).trim()
+      : null;
+
     const token =
       req.cookies?.salonbook_token ||
-      (req.headers.authorization?.startsWith('Bearer ')
-        ? req.headers.authorization.slice(7)
+      (bearerToken && bearerToken !== 'null' && bearerToken !== 'undefined'
+        ? bearerToken
         : null);
 
-    if (!token) {
-      return res.status(401).json({ success: false, message: 'Authentication required.' });
-    }
-
-    const decoded = jwt.verify(token, JWT_SECRET);
     const { users } = cols();
 
-    const query = ObjectId.isValid(decoded.userId)
-      ? { _id: new ObjectId(decoded.userId) }
-      : { email: String(decoded.email || '').toLowerCase() };
+    if (token) {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      const query = ObjectId.isValid(decoded.userId)
+        ? { _id: new ObjectId(decoded.userId) }
+        : { email: String(decoded.email || '').toLowerCase() };
 
-    const userDoc = await users.findOne(query, {
-      projection: { passwordHash: 0, password: 0 },
-    });
-
-    if (!userDoc) {
-      return res.status(401).json({ success: false, message: 'User account not found.' });
-    }
-
-    if (userDoc.isBlocked) {
-      return res.status(403).json({
-        success: false,
-        code: 'USER_BLOCKED',
-        message: 'Your account is blocked. Please contact SalonBook support.',
+      const userDoc = await users.findOne(query, {
+        projection: { passwordHash: 0, password: 0 },
       });
+
+      if (!userDoc) {
+        return res.status(401).json({ success: false, message: 'User account not found.' });
+      }
+
+      if (userDoc.isBlocked) {
+        return res.status(403).json({
+          success: false,
+          code: 'USER_BLOCKED',
+          message: 'Your account is blocked. Please contact SalonBook support.',
+        });
+      }
+
+      req.user = formatSafeUser(userDoc);
+      return next();
     }
 
-    req.user = formatSafeUser(userDoc);
-    return next();
+    // Fallback: check Better Auth session cookie if present
+    if (req.headers.cookie) {
+      const sessionUserDoc = await resolveBetterAuthUserFromCookieHeader(req.headers.cookie);
+      if (sessionUserDoc) {
+        if (sessionUserDoc.isBlocked) {
+          return res.status(403).json({
+            success: false,
+            code: 'USER_BLOCKED',
+            message: 'Your account is blocked. Please contact SalonBook support.',
+          });
+        }
+        req.user = formatSafeUser(sessionUserDoc);
+        issueTokenCookie(res, req.user);
+        return next();
+      }
+    }
+
+    return res.status(401).json({ success: false, message: 'Authentication required.' });
   } catch {
     return res.status(401).json({ success: false, message: 'Invalid or expired session.' });
   }
@@ -334,11 +383,29 @@ app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok', service: 'salonbook-api' });
 });
 
-const allowedOrigins = new Set([CLIENT_URL]);
+// Allowed browser origins: the deployed frontend + local dev servers.
+// EXTRA_ALLOWED_ORIGINS (comma separated) covers LAN IPs such as http://192.168.0.101:3000
+const extraOrigins = (process.env.EXTRA_ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((value) => value.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+
+const allowedOrigins = new Set(
+  [CLIENT_URL, ...extraOrigins].filter(Boolean).map((value) => value.replace(/\/$/, ''))
+);
+
+function isLocalDevOrigin(origin) {
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+}
+
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.has(origin.replace(/\/$/, ''))) {
+      if (
+        !origin ||
+        isLocalDevOrigin(origin) ||
+        allowedOrigins.has(origin.replace(/\/$/, ''))
+      ) {
         callback(null, true);
       } else {
         callback(new Error(`CORS policy blocked origin: ${origin}`));
@@ -451,15 +518,20 @@ app.post('/api/v1/auth/register', async (req, res, next) => {
     const result = await users.insertOne(doc);
     const createdUser = formatSafeUser({ _id: result.insertedId, ...doc });
 
+    // Better Auth looks up credential accounts with
+    // { userId: ObjectId(uid), providerId: "credential", accountId: uid }
+    // (findCredentialAccount) — so the account must be keyed by the user's
+    // id, not by email, and userId must be an ObjectId like Better Auth's
+    // own writes. Otherwise sign-in/email and password resets fail.
     await accounts.updateOne(
       {
         providerId: 'credential',
-        accountId: normalizedEmail,
+        accountId: result.insertedId.toHexString(),
       },
       {
         $setOnInsert: {
-          userId: result.insertedId.toHexString(),
-          accountId: normalizedEmail,
+          userId: result.insertedId,
+          accountId: result.insertedId.toHexString(),
           providerId: 'credential',
           password: passwordHash,
           createdAt: now,
@@ -515,7 +587,7 @@ app.post('/api/v1/auth/login', async (req, res, next) => {
         $or: [
           { userId: userDoc._id.toHexString() },
           { userId: userDoc._id },
-          { accountId: normalizedEmail },
+          { accountId: userDoc._id.toHexString() },
         ],
       });
       storedHash = accountDoc?.password || null;
@@ -561,7 +633,22 @@ app.post('/api/v1/auth/login', async (req, res, next) => {
 // Sync Better Auth session (e.g., after Google OAuth callback) into salonbook_token cookie
 app.post('/api/v1/auth/sync-session', async (req, res, next) => {
   try {
-    const userDoc = await resolveBetterAuthUserFromCookieHeader(req.headers.cookie);
+    const { name, avatarUrl, sessionToken } = req.body || {};
+
+    // Cross-origin browser calls never carry the Better Auth cookie (it belongs
+    // to the frontend origin), so the client may present the session token in
+    // the body instead. It is still validated server-to-server by get-session.
+    const trimmedToken = String(sessionToken || '').trim();
+    let cookieHeader = String(req.headers.cookie || '');
+    if (trimmedToken) {
+      if (!/^[A-Za-z0-9._\-+/=]+$/.test(trimmedToken)) {
+        return res.status(401).json({ success: false, message: 'Invalid session token.' });
+      }
+      const tokenCookies = `better-auth.session_token=${trimmedToken}; __Secure-better-auth.session_token=${trimmedToken}`;
+      cookieHeader = cookieHeader ? `${cookieHeader}; ${tokenCookies}` : tokenCookies;
+    }
+
+    const userDoc = await resolveBetterAuthUserFromCookieHeader(cookieHeader);
 
     if (!userDoc) {
       return res.status(401).json({ success: false, message: 'No active session found.' });
@@ -574,7 +661,6 @@ app.post('/api/v1/auth/sync-session', async (req, res, next) => {
       });
     }
 
-    const { name, avatarUrl } = req.body || {};
     const trimmedName = String(name || '').trim();
     const trimmedAvatar = String(avatarUrl || '').trim();
     const profileUpdates = {};
@@ -596,8 +682,9 @@ app.post('/api/v1/auth/sync-session', async (req, res, next) => {
         { $set: profileUpdates },
         { returnDocument: 'after', projection: { passwordHash: 0, password: 0 } }
       );
-      if (updatedDoc) {
-        finalDoc = updatedDoc;
+      const resolved = updatedDoc?.value || updatedDoc;
+      if (resolved && resolved._id) {
+        finalDoc = resolved;
       }
     }
 
@@ -624,7 +711,8 @@ app.post('/api/v1/auth/logout', (_req, res) => {
 });
 
 app.get('/api/v1/auth/me', requireAuth, (req, res) => {
-  return res.status(200).json({ success: true, user: req.user });
+  const token = issueTokenCookie(res, req.user);
+  return res.status(200).json({ success: true, user: req.user, token });
 });
 
 app.patch('/api/v1/profile', requireAuth, async (req, res, next) => {
@@ -655,17 +743,20 @@ app.patch('/api/v1/profile', requireAuth, async (req, res, next) => {
       { returnDocument: 'after', projection: { passwordHash: 0, password: 0 } }
     );
 
+    const resolvedDoc = updated?.value || updated;
+
     return res.status(200).json({
       success: true,
       message: 'Profile updated.',
-      user: updated
-        ? formatSafeUser(updated)
-        : {
-            ...req.user,
-            name: trimmedName,
-            phone: String(phone || '').trim(),
-            avatarUrl: trimmedAvatar,
-          },
+      user:
+        resolvedDoc && resolvedDoc._id
+          ? formatSafeUser(resolvedDoc)
+          : {
+              ...req.user,
+              name: trimmedName,
+              phone: String(phone || '').trim(),
+              avatarUrl: trimmedAvatar,
+            },
     });
   } catch (err) {
     return next(err);
@@ -805,11 +896,12 @@ app.patch('/api/v1/services/:id', requireAuth, requireRole('admin'), async (req,
       { returnDocument: 'after' }
     );
 
-    if (!updated) {
+    const resolved = updated?.value || updated;
+    if (!resolved) {
       return res.status(404).json({ success: false, message: 'Service not found.' });
     }
 
-    return res.status(200).json({ success: true, service: updated });
+    return res.status(200).json({ success: true, service: resolved });
   } catch (err) {
     return next(err);
   }
@@ -969,7 +1061,7 @@ app.patch('/api/v1/appointments/:id', requireAuth, async (req, res, next) => {
       { returnDocument: 'after' }
     );
 
-    return res.status(200).json({ success: true, appointment: updated });
+    return res.status(200).json({ success: true, appointment: updated?.value || updated });
   } catch (err) {
     return next(err);
   }
@@ -1120,11 +1212,12 @@ app.patch('/api/v1/users/:id/block', requireAuth, requireRole('admin'), async (r
       { returnDocument: 'after', projection: { passwordHash: 0, password: 0 } }
     );
 
-    if (!updated) {
+    const resolved = updated?.value || updated;
+    if (!resolved) {
       return res.status(404).json({ success: false, message: 'Customer not found.' });
     }
 
-    return res.status(200).json({ success: true, user: updated });
+    return res.status(200).json({ success: true, user: resolved });
   } catch (err) {
     return next(err);
   }
@@ -1200,4 +1293,3 @@ if (!process.env.VERCEL) {
 }
 
 export default app;
-
