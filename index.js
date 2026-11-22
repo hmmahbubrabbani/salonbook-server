@@ -1105,11 +1105,11 @@ app.post('/api/v1/upload', upload.single('image'), async (req, res, next) =>{
 // ---------------------------------------------------------------------------
 // 10. 404 & Global Error Handlers
 // ---------------------------------------------------------------------------
-app.use((_req, res) => {
+app.use((_req, res) =>{
   res.status(404).json({ success: false, message: 'API route not found.' });
 });
 
-app.use((err, _req, res, _next) => {
+app.use((err, _req, res, _next) =>{
   const status = err.statusCode || 500;
   res.status(status).json({
     success: false,
