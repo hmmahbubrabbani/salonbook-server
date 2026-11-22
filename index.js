@@ -142,11 +142,11 @@ async function ensureDatabaseReady() {
 // 3. Helper Functions & Middlewares
 // ---------------------------------------------------------------------------
 function cookieOptions() {
-  const isProd = NODE_ENV === 'production';
+  const isHttps = NODE_ENV === 'production' || CLIENT_URL.startsWith('https://');
   return {
     httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? 'none' : 'lax',
+    secure: isHttps,
+    sameSite: isHttps ? 'none' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000,
     path: '/',
   };
@@ -328,6 +328,7 @@ const upload = multer({
 // 4. Express App Setup
 // ---------------------------------------------------------------------------
 const app = express();
+app.set('trust proxy', 1);
 
 app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok', service: 'salonbook-api' });
@@ -1199,3 +1200,4 @@ if (!process.env.VERCEL) {
 }
 
 export default app;
+
