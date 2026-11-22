@@ -618,7 +618,7 @@ app.patch('/api/v1/profile', requireAuth, async (req, res, next) => {
 // ---------------------------------------------------------------------------
 // 6. Services Routes
 // ---------------------------------------------------------------------------
-app.get('/api/v1/services', async (req, res, next) => {
+app.get('/api/v1/services', async (req, res, next) =>{
   try {
     const { services } = cols();
     const includeAll = req.query.all === 'true';
@@ -639,7 +639,7 @@ app.get('/api/v1/services', async (req, res, next) => {
   }
 });
 
-app.get('/api/v1/services/:id', requireAuth, async (req, res, next) => {
+app.get('/api/v1/services/:id', requireAuth, async (req, res, next) =>{
   try {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) {
@@ -658,7 +658,7 @@ app.get('/api/v1/services/:id', requireAuth, async (req, res, next) => {
   }
 });
 
-app.post('/api/v1/services', requireAuth, requireRole('admin'), async (req, res, next) => {
+app.post('/api/v1/services', requireAuth, requireRole('admin'), async (req, res, next) =>{
   try {
     const { title, description, category, durationMinutes, priceCents, imageUrl, isActive } =
       req.body || {};
@@ -670,7 +670,7 @@ app.post('/api/v1/services', requireAuth, requireRole('admin'), async (req, res,
     const numericPrice = Number(priceCents);
     const numericDuration = Number(durationMinutes);
 
-    if (!trimmedTitle || !trimmedCategory || !trimmedDesc || !trimmedImg) {
+    if (!trimmedTitle || !trimmedCategory || !trimmedDesc || !trimmedImg){
       return res.status(400).json({
         success: false,
         message: 'Title, category, description, and uploaded image are required.',
@@ -709,7 +709,7 @@ app.post('/api/v1/services', requireAuth, requireRole('admin'), async (req, res,
   }
 });
 
-app.patch('/api/v1/services/:id', requireAuth, requireRole('admin'), async (req, res, next) => {
+app.patch('/api/v1/services/:id', requireAuth, requireRole('admin'), async (req, res, next) =>{
   try {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) {
