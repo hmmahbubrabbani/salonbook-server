@@ -520,11 +520,11 @@ app.post('/api/v1/auth/login', async (req, res, next) =>{
 app.post('/api/v1/auth/sync-session', async (req, res, next) => {
   try {
     let userDoc = null;
-    if (req.headers.cookie) {
+    if (req.headers.cookie){
       userDoc = await resolveBetterAuthUserFromCookieHeader(req.headers.cookie);
     }
 
-    if (!userDoc && req.body?.email) {
+    if (!userDoc && req.body?.email){
       const normalizedEmail = String(req.body.email).toLowerCase().trim();
       const { users } = cols();
       userDoc = await users.findOne(
@@ -533,11 +533,11 @@ app.post('/api/v1/auth/sync-session', async (req, res, next) => {
       );
     }
 
-    if (!userDoc) {
+    if (!userDoc){
       return res.status(401).json({ success: false, message: 'No active session found.' });
     }
 
-    if (userDoc.isBlocked) {
+    if (userDoc.isBlocked){
       return res.status(403).json({
         success: false,
         message: 'Your account is blocked. Please contact SalonBook support.',
@@ -552,7 +552,7 @@ app.post('/api/v1/auth/sync-session', async (req, res, next) => {
   }
 });
 
-app.post('/api/v1/auth/logout', (_req, res) => {
+app.post('/api/v1/auth/logout', (_req, res) =>{
   const opts = cookieOptions();
   const clearOpts = {
     httpOnly: opts.httpOnly,
@@ -566,7 +566,7 @@ app.post('/api/v1/auth/logout', (_req, res) => {
   return res.status(200).json({ success: true, message: 'Signed out.' });
 });
 
-app.get('/api/v1/auth/me', requireAuth, (req, res) => {
+app.get('/api/v1/auth/me', requireAuth, (req, res) =>{
   return res.status(200).json({ success: true, user: req.user });
 });
 
