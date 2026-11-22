@@ -11,9 +11,9 @@ import { MongoClient, ObjectId } from 'mongodb';
 // ---------------------------------------------------------------------------
 // 1. Environment Configuration & Startup Guard
 // ---------------------------------------------------------------------------
-const PORT = Number(process.env.PORT || 5000);
+const PORT = Number(process.env.PORT);
 const NODE_ENV = process.env.NODE_ENV || 'development';
-const CLIENT_URL = (process.env.CLIENT_URL || 'http://localhost:3000').replace(/\/$/, '');
+const CLIENT_URL = (process.env.CLIENT_URL);
 const MONGODB_URI = process.env.MONGODB_URI;
 const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || 'salonbook';
 const JWT_SECRET = process.env.JWT_ACCESS_SECRET || process.env.BETTER_AUTH_SECRET;
@@ -22,7 +22,7 @@ const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
 const IMGBB_API_KEY = process.env.IMGBB_API_KEY || '';
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').toLowerCase().trim();
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
-const ADMIN_NAME = process.env.ADMIN_NAME || 'SalonBook Admin';
+const ADMIN_NAME = process.env.ADMIN_NAME;
 
 if (!MONGODB_URI) {
   console.error('[SalonBook] Missing MONGODB_URI in environment variables.');
