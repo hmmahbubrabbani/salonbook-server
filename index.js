@@ -466,7 +466,7 @@ app.post('/api/v1/auth/login', async (req, res, next) =>{
 
     // 1) Check hash on user document or Better Auth 'account' collection
     let storedHash = userDoc.passwordHash || userDoc.password || null;
-    if (!storedHash) {
+    if (!storedHash){
       const accountDoc = await accounts.findOne({
         providerId: 'credential',
         $or: [
@@ -479,12 +479,12 @@ app.post('/api/v1/auth/login', async (req, res, next) =>{
     }
 
     let valid = false;
-    if (storedHash && storedHash.startsWith('$2')) {
+    if (storedHash && storedHash.startsWith('$2')){
       valid = await bcrypt.compare(password, storedHash);
     }
 
     // 2) Fallback: verify via Better Auth endpoint (supports scrypt / Better Auth hashes)
-    if (!valid) {
+    if (!valid){
       try {
         const baRes = await fetch(`${CLIENT_URL}/api/auth/sign-in/email`, {
           method: 'POST',
