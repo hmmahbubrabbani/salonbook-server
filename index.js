@@ -9,9 +9,6 @@ import Stripe from 'stripe';
 import { MongoClient, ObjectId } from 'mongodb';
 
 // ---------------------------------------------------------------------------
-// 1. Environment Configuration & Startup Guard
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
 // 1. Environment Configuration & Startup Guard (salonbook-server)
 // ---------------------------------------------------------------------------
 const PORT = Number(process.env.PORT) || 5000;
@@ -27,7 +24,6 @@ const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').toLowerCase().trim();
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const ADMIN_NAME = (process.env.ADMIN_NAME || 'SalonBook Admin').trim();
 
-// Startup Validation (প্রয়োজনীয় ভেরিয়েবল না থাকলে সার্ভার শুরু হওয়ার আগেই থামাবে)
 if (!CLIENT_URL) {
   console.error('[SalonBook] Missing CLIENT_URL in environment variables.');
   process.exit(1);
@@ -54,23 +50,25 @@ const mongoClient = new MongoClient(MONGODB_URI, {
 });
 
 let db;
+let dbInitPromise = null;
 
-function cols(){
+function cols() {
+  if (!db) {
+    throw new Error('Database connection is not initialized.');
+  }
   return {
     users: db.collection('user'),
     accounts: db.collection('account'),
-    sessions: db.collection('session'),
     services: db.collection('services'),
     appointments: db.collection('appointments'),
     transactions: db.collection('transactions'),
   };
 }
 
-async function ensureIndexSafe(collection, keys, options = {}){
+async function ensureIndexSafe(collection, keys, options = {}) {
   try {
     await collection.createIndex(keys, options);
   } catch (err) {
-    // 85: IndexOptionsConflict, 86: IndexKeySpecsConflict, 11000: DuplicateKey
     if (err?.code === 85 || err?.code === 86 || err?.code === 11000) {
       console.warn(
         `[SalonBook] Skipped index on ${collection.collectionName} (${JSON.stringify(keys)}): code ${err.code}`
@@ -81,7 +79,7 @@ async function ensureIndexSafe(collection, keys, options = {}){
   }
 }
 
-async function initDatabase(){
+async function initDatabase() {
   await mongoClient.connect();
   db = mongoClient.db(MONGODB_DB_NAME);
 
@@ -93,7 +91,7 @@ async function initDatabase(){
     ensureIndexSafe(transactions, { stripeSessionId: 1 }, { unique: true, sparse: true }),
   ]);
 
-  if (ADMIN_EMAIL && ADMIN_PASSWORD){
+  if (ADMIN_EMAIL && ADMIN_PASSWORD) {
     const existingAdmin = await users.findOne({ email: ADMIN_EMAIL });
     if (!existingAdmin) {
       const now = new Date().toISOString();
@@ -118,10 +116,22 @@ async function initDatabase(){
   console.log(`[SalonBook] Connected to MongoDB (${MONGODB_DB_NAME})`);
 }
 
+async function ensureDatabaseReady() {
+  if (db) return db;
+  if (!dbInitPromise) {
+    dbInitPromise = initDatabase().catch((err) => {
+      dbInitPromise = null;
+      throw err;
+    });
+  }
+  await dbInitPromise;
+  return db;
+}
+
 // ---------------------------------------------------------------------------
 // 3. Helper Functions & Middlewares
 // ---------------------------------------------------------------------------
-function cookieOptions(){
+function cookieOptions() {
   const isProd = NODE_ENV === 'production';
   return {
     httpOnly: true,
@@ -132,7 +142,7 @@ function cookieOptions(){
   };
 }
 
-function issueTokenCookie(res, user){
+function issueTokenCookie(res, user) {
   const token = jwt.sign(
     { userId: String(user._id), email: user.email, role: user.role || 'client' },
     JWT_SECRET,
@@ -142,7 +152,7 @@ function issueTokenCookie(res, user){
   return token;
 }
 
-function formatSafeUser(userDoc){
+function formatSafeUser(userDoc) {
   return {
     _id: userDoc._id.toHexString(),
     name: userDoc.name,
@@ -154,7 +164,7 @@ function formatSafeUser(userDoc){
   };
 }
 
-function validatePassword(password){
+function validatePassword(password) {
   if (typeof password !== 'string' || password.length < 6) {
     return 'Password must be at least 6 characters long.';
   }
@@ -167,7 +177,7 @@ function validatePassword(password){
   return null;
 }
 
-async function resolveBetterAuthUserFromCookieHeader(cookieHeader){
+async function resolveBetterAuthUserFromCookieHeader(cookieHeader) {
   if (!cookieHeader) return null;
   try {
     const res = await fetch(`${CLIENT_URL}/api/auth/get-session`, {
@@ -190,7 +200,7 @@ async function resolveBetterAuthUserFromCookieHeader(cookieHeader){
   }
 }
 
-async function requireAuth(req, res, next){
+async function requireAuth(req, res, next) {
   try {
     const token =
       req.cookies?.salonbook_token ||
@@ -217,7 +227,7 @@ async function requireAuth(req, res, next){
       return res.status(401).json({ success: false, message: 'User account not found.' });
     }
 
-    if (userDoc.isBlocked){
+    if (userDoc.isBlocked) {
       return res.status(403).json({
         success: false,
         code: 'USER_BLOCKED',
@@ -232,7 +242,7 @@ async function requireAuth(req, res, next){
   }
 }
 
-function requireRole(...allowedRoles){
+function requireRole(...allowedRoles) {
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ success: false, message: 'Authentication required.' });
@@ -250,7 +260,7 @@ function requireRole(...allowedRoles){
   };
 }
 
-async function recordVerifiedPayment(session){
+async function recordVerifiedPayment(session) {
   const appointmentId = session.metadata?.appointmentId;
   if (!appointmentId || !ObjectId.isValid(appointmentId)) return null;
 
@@ -305,7 +315,7 @@ const upload = multer({
 // ---------------------------------------------------------------------------
 const app = express();
 
-app.get('/health', (_req, res) =>{
+app.get('/health', (_req, res) => {
   res.status(200).json({ status: 'ok', service: 'salonbook-api' });
 });
 
@@ -325,13 +335,24 @@ app.use(
   })
 );
 
+// Ensure MongoDB connection is ready before handling API routes
+app.use(async (req, res, next) => {
+  if (req.path === '/health') return next();
+  try {
+    await ensureDatabaseReady();
+    return next();
+  } catch (err) {
+    return next(err);
+  }
+});
+
 // Stripe Webhook MUST receive raw body BEFORE express.json()
 app.post(
   '/api/v1/payments/webhook',
   express.raw({ type: 'application/json' }),
-  async (req, res) =>{
+  async (req, res) => {
     if (!stripe || !STRIPE_WEBHOOK_SECRET) {
-      return res.status(500).json({ error: 'Stripe webhook is not configured.'});
+      return res.status(500).json({ error: 'Stripe webhook is not configured.' });
     }
 
     const sig = req.headers['stripe-signature'];
@@ -361,20 +382,20 @@ app.post(
   }
 );
 
-app.use(express.json({ limit: '2mb'}));
+app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 // ---------------------------------------------------------------------------
 // 5. Authentication & Profile Routes
 // ---------------------------------------------------------------------------
-app.post('/api/v1/auth/register', async(req, res, next) =>{
+app.post('/api/v1/auth/register', async (req, res, next) => {
   try {
     const { name, email, password, avatarUrl, image, phone } = req.body || {};
     const normalizedEmail = String(email || '').toLowerCase().trim();
     const resolvedAvatar = String(avatarUrl || image || '').trim();
 
-    if (!String(name || '').trim() || !normalizedEmail || !password){
+    if (!String(name || '').trim() || !normalizedEmail || !password) {
       return res.status(400).json({
         success: false,
         message: 'Full name, email, and password are required.',
@@ -398,7 +419,6 @@ app.post('/api/v1/auth/register', async(req, res, next) =>{
     const now = new Date().toISOString();
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // Public sign-up always assigns role: 'client'
     const doc = {
       name: String(name).trim(),
       email: normalizedEmail,
@@ -448,7 +468,7 @@ app.post('/api/v1/auth/register', async(req, res, next) =>{
   }
 });
 
-app.post('/api/v1/auth/login', async (req, res, next) =>{
+app.post('/api/v1/auth/login', async (req, res, next) => {
   try {
     const { email, password } = req.body || {};
     const normalizedEmail = String(email || '').toLowerCase().trim();
@@ -466,16 +486,15 @@ app.post('/api/v1/auth/login', async (req, res, next) =>{
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
 
-    if (userDoc.isBlocked){
+    if (userDoc.isBlocked) {
       return res.status(403).json({
         success: false,
         message: 'Your account is blocked. Please contact SalonBook support.',
       });
     }
 
-    // 1) Check hash on user document or Better Auth 'account' collection
     let storedHash = userDoc.passwordHash || userDoc.password || null;
-    if (!storedHash){
+    if (!storedHash) {
       const accountDoc = await accounts.findOne({
         providerId: 'credential',
         $or: [
@@ -488,12 +507,11 @@ app.post('/api/v1/auth/login', async (req, res, next) =>{
     }
 
     let valid = false;
-    if (storedHash && storedHash.startsWith('$2')){
+    if (storedHash && storedHash.startsWith('$2')) {
       valid = await bcrypt.compare(password, storedHash);
     }
 
-    // 2) Fallback: verify via Better Auth endpoint (supports scrypt / Better Auth hashes)
-    if (!valid){
+    if (!valid) {
       try {
         const baRes = await fetch(`${CLIENT_URL}/api/auth/sign-in/email`, {
           method: 'POST',
@@ -528,25 +546,13 @@ app.post('/api/v1/auth/login', async (req, res, next) =>{
 // Sync Better Auth session (e.g., after Google OAuth callback) into salonbook_token cookie
 app.post('/api/v1/auth/sync-session', async (req, res, next) => {
   try {
-    let userDoc = null;
-    if (req.headers.cookie){
-      userDoc = await resolveBetterAuthUserFromCookieHeader(req.headers.cookie);
-    }
+    const userDoc = await resolveBetterAuthUserFromCookieHeader(req.headers.cookie);
 
-    if (!userDoc && req.body?.email){
-      const normalizedEmail = String(req.body.email).toLowerCase().trim();
-      const { users } = cols();
-      userDoc = await users.findOne(
-        { email: normalizedEmail },
-        { projection: { passwordHash: 0, password: 0 } }
-      );
-    }
-
-    if (!userDoc){
+    if (!userDoc) {
       return res.status(401).json({ success: false, message: 'No active session found.' });
     }
 
-    if (userDoc.isBlocked){
+    if (userDoc.isBlocked) {
       return res.status(403).json({
         success: false,
         message: 'Your account is blocked. Please contact SalonBook support.',
@@ -561,7 +567,7 @@ app.post('/api/v1/auth/sync-session', async (req, res, next) => {
   }
 });
 
-app.post('/api/v1/auth/logout', (_req, res) =>{
+app.post('/api/v1/auth/logout', (_req, res) => {
   const opts = cookieOptions();
   const clearOpts = {
     httpOnly: opts.httpOnly,
@@ -575,7 +581,7 @@ app.post('/api/v1/auth/logout', (_req, res) =>{
   return res.status(200).json({ success: true, message: 'Signed out.' });
 });
 
-app.get('/api/v1/auth/me', requireAuth, (req, res) =>{
+app.get('/api/v1/auth/me', requireAuth, (req, res) => {
   return res.status(200).json({ success: true, user: req.user });
 });
 
@@ -627,7 +633,7 @@ app.patch('/api/v1/profile', requireAuth, async (req, res, next) => {
 // ---------------------------------------------------------------------------
 // 6. Services Routes
 // ---------------------------------------------------------------------------
-app.get('/api/v1/services', async (req, res, next) =>{
+app.get('/api/v1/services', async (req, res, next) => {
   try {
     const { services } = cols();
     const includeAll = req.query.all === 'true';
@@ -648,7 +654,7 @@ app.get('/api/v1/services', async (req, res, next) =>{
   }
 });
 
-app.get('/api/v1/services/:id', requireAuth, async (req, res, next) =>{
+app.get('/api/v1/services/:id', requireAuth, async (req, res, next) => {
   try {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) {
@@ -667,7 +673,7 @@ app.get('/api/v1/services/:id', requireAuth, async (req, res, next) =>{
   }
 });
 
-app.post('/api/v1/services', requireAuth, requireRole('admin'), async (req, res, next) =>{
+app.post('/api/v1/services', requireAuth, requireRole('admin'), async (req, res, next) => {
   try {
     const { title, description, category, durationMinutes, priceCents, imageUrl, isActive } =
       req.body || {};
@@ -679,7 +685,7 @@ app.post('/api/v1/services', requireAuth, requireRole('admin'), async (req, res,
     const numericPrice = Number(priceCents);
     const numericDuration = Number(durationMinutes);
 
-    if (!trimmedTitle || !trimmedCategory || !trimmedDesc || !trimmedImg){
+    if (!trimmedTitle || !trimmedCategory || !trimmedDesc || !trimmedImg) {
       return res.status(400).json({
         success: false,
         message: 'Title, category, description, and uploaded image are required.',
@@ -718,7 +724,7 @@ app.post('/api/v1/services', requireAuth, requireRole('admin'), async (req, res,
   }
 });
 
-app.patch('/api/v1/services/:id', requireAuth, requireRole('admin'), async (req, res, next) =>{
+app.patch('/api/v1/services/:id', requireAuth, requireRole('admin'), async (req, res, next) => {
   try {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) {
@@ -789,7 +795,7 @@ app.delete('/api/v1/services/:id', requireAuth, requireRole('admin'), async (req
 // ---------------------------------------------------------------------------
 // 7. Appointments Routes
 // ---------------------------------------------------------------------------
-app.get('/api/v1/appointments', requireAuth, async (req, res, next) =>{
+app.get('/api/v1/appointments', requireAuth, async (req, res, next) => {
   try {
     const { appointments } = cols();
     const filter = req.user.role === 'admin' ? {} : { clientId: req.user._id };
@@ -800,13 +806,13 @@ app.get('/api/v1/appointments', requireAuth, async (req, res, next) =>{
   }
 });
 
-app.post('/api/v1/appointments', requireAuth, requireRole('client'), async (req, res, next) =>{
+app.post('/api/v1/appointments', requireAuth, requireRole('client'), async (req, res, next) => {
   try {
     const { serviceId, date, startTime, message } = req.body || {};
     const trimmedDate = String(date || '').trim();
     const trimmedSlot = String(startTime || '').trim();
 
-    if (!serviceId || !ObjectId.isValid(serviceId) || !trimmedDate || !trimmedSlot){
+    if (!serviceId || !ObjectId.isValid(serviceId) || !trimmedDate || !trimmedSlot) {
       return res.status(400).json({
         success: false,
         message: 'Service ID, appointment date, and time slot are required.',
@@ -819,7 +825,7 @@ app.post('/api/v1/appointments', requireAuth, requireRole('client'), async (req,
       return res.status(404).json({ success: false, message: 'Service not found.' });
     }
 
-    if (!service.isActive){
+    if (!service.isActive) {
       return res.status(400).json({
         success: false,
         message: 'Inactive services are not available for booking.',
@@ -832,7 +838,7 @@ app.post('/api/v1/appointments', requireAuth, requireRole('client'), async (req,
       status: { $in: ['Pending', 'Confirmed'] },
     });
 
-    if (conflict){
+    if (conflict) {
       return res.status(409).json({
         success: false,
         message: `Slot ${trimmedSlot} on ${trimmedDate} is already booked.`,
@@ -868,7 +874,7 @@ app.post('/api/v1/appointments', requireAuth, requireRole('client'), async (req,
   }
 });
 
-app.patch('/api/v1/appointments/:id', requireAuth, async (req, res, next) =>{
+app.patch('/api/v1/appointments/:id', requireAuth, async (req, res, next) => {
   try {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) {
@@ -930,14 +936,14 @@ app.patch('/api/v1/appointments/:id', requireAuth, async (req, res, next) =>{
 // ---------------------------------------------------------------------------
 // 8. Stripe Checkout, Verification & Transactions Routes
 // ---------------------------------------------------------------------------
-app.post('/api/v1/payments/checkout', requireAuth, requireRole('client'), async (req, res, next) =>{
+app.post('/api/v1/payments/checkout', requireAuth, requireRole('client'), async (req, res, next) => {
   try {
     if (!stripe) {
       return res.status(500).json({ success: false, message: 'Stripe is not configured.' });
     }
 
     const { appointmentId } = req.body || {};
-    if (!appointmentId || !ObjectId.isValid(appointmentId)){
+    if (!appointmentId || !ObjectId.isValid(appointmentId)) {
       return res.status(400).json({ success: false, message: 'Invalid appointment ID.' });
     }
 
@@ -949,18 +955,18 @@ app.post('/api/v1/payments/checkout', requireAuth, requireRole('client'), async 
       return res.status(404).json({ success: false, message: 'Appointment not found.' });
     }
 
-    if (appointment.clientId !== req.user._id){
+    if (appointment.clientId !== req.user._id) {
       return res.status(403).json({ success: false, message: 'Forbidden.' });
     }
 
-    if (appointment.status !== 'Confirmed'){
+    if (appointment.status !== 'Confirmed') {
       return res.status(400).json({
         success: false,
         message: 'Only Confirmed appointments can be paid.',
       });
     }
 
-    if (appointment.paymentStatus === 'Paid'){
+    if (appointment.paymentStatus === 'Paid') {
       return res.status(400).json({
         success: false,
         message: 'This appointment is already paid.',
@@ -1009,7 +1015,7 @@ app.post('/api/v1/payments/checkout', requireAuth, requireRole('client'), async 
   }
 });
 
-app.get('/api/v1/payments/verify', requireAuth, async (req, res, next) =>{
+app.get('/api/v1/payments/verify', requireAuth, async (req, res, next) => {
   try {
     if (!stripe) {
       return res.status(500).json({ success: false, message: 'Stripe is not configured.' });
@@ -1032,7 +1038,7 @@ app.get('/api/v1/payments/verify', requireAuth, async (req, res, next) =>{
   }
 });
 
-app.get('/api/v1/transactions', requireAuth, requireRole('admin'), async (_req, res, next) =>{
+app.get('/api/v1/transactions', requireAuth, requireRole('admin'), async (_req, res, next) => {
   try {
     const { transactions } = cols();
     const list = await transactions.find({}).sort({ createdAt: -1 }).toArray();
@@ -1045,7 +1051,7 @@ app.get('/api/v1/transactions', requireAuth, requireRole('admin'), async (_req, 
 // ---------------------------------------------------------------------------
 // 9. Admin User Management & ImgBB Upload Routes
 // ---------------------------------------------------------------------------
-app.get('/api/v1/users', requireAuth, requireRole('admin'), async (_req, res, next) =>{
+app.get('/api/v1/users', requireAuth, requireRole('admin'), async (_req, res, next) => {
   try {
     const { users } = cols();
     const list = await users
@@ -1058,7 +1064,7 @@ app.get('/api/v1/users', requireAuth, requireRole('admin'), async (_req, res, ne
   }
 });
 
-app.patch('/api/v1/users/:id/block', requireAuth, requireRole('admin'), async (req, res, next) =>{
+app.patch('/api/v1/users/:id/block', requireAuth, requireRole('admin'), async (req, res, next) => {
   try {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) {
@@ -1068,7 +1074,7 @@ app.patch('/api/v1/users/:id/block', requireAuth, requireRole('admin'), async (r
     const { users } = cols();
     const updated = await users.findOneAndUpdate(
       { _id: new ObjectId(id), role: { $ne: 'admin' } },
-      { $set: { isBlocked: Boolean(req.body?.isBlocked), updatedAt: new Date().toISOString() }},
+      { $set: { isBlocked: Boolean(req.body?.isBlocked), updatedAt: new Date().toISOString() } },
       { returnDocument: 'after', projection: { passwordHash: 0, password: 0 } }
     );
 
@@ -1082,7 +1088,7 @@ app.patch('/api/v1/users/:id/block', requireAuth, requireRole('admin'), async (r
   }
 });
 
-app.post('/api/v1/upload', upload.single('image'), async (req, res, next) =>{
+app.post('/api/v1/upload', upload.single('image'), async (req, res, next) => {
   try {
     if (!IMGBB_API_KEY) {
       return res.status(500).json({ success: false, message: 'IMGBB_API_KEY is not set.' });
@@ -1095,13 +1101,13 @@ app.post('/api/v1/upload', upload.single('image'), async (req, res, next) =>{
     params.append('key', IMGBB_API_KEY);
     params.append('image', req.file.buffer.toString('base64'));
 
-    const response = await fetch('https://api.imgbb.com/1/upload',{
+    const response = await fetch('https://api.imgbb.com/1/upload', {
       method: 'POST',
       body: params,
     });
     const data = await response.json();
 
-    if (!response.ok || !data?.success || !data?.data?.display_url){
+    if (!response.ok || !data?.success || !data?.data?.display_url) {
       return res.status(502).json({ success: false, message: 'ImgBB image upload failed.' });
     }
 
@@ -1114,11 +1120,11 @@ app.post('/api/v1/upload', upload.single('image'), async (req, res, next) =>{
 // ---------------------------------------------------------------------------
 // 10. 404 & Global Error Handlers
 // ---------------------------------------------------------------------------
-app.use((_req, res) =>{
+app.use((_req, res) => {
   res.status(404).json({ success: false, message: 'API route not found.' });
 });
 
-app.use((err, _req, res, _next) =>{
+app.use((err, _req, res, _next) => {
   const status = err.statusCode || 500;
   res.status(status).json({
     success: false,
@@ -1127,17 +1133,19 @@ app.use((err, _req, res, _next) =>{
 });
 
 // ---------------------------------------------------------------------------
-// 11. Start Server
+// 11. Start Server (Local vs Vercel Serverless)
 // ---------------------------------------------------------------------------
-initDatabase()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`[SalonBook] Express server listening on port ${PORT} (${NODE_ENV})`);
+if (!process.env.VERCEL) {
+  ensureDatabaseReady()
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log(`[SalonBook] Express server listening on port ${PORT} (${NODE_ENV})`);
+      });
+    })
+    .catch((err) => {
+      console.error('[SalonBook] Failed to start server:', err);
+      process.exit(1);
     });
-  })
-  .catch((err) => {
-    console.error('[SalonBook] Failed to start server:', err);
-    process.exit(1);
-  });
+}
 
 export default app;
