@@ -46,7 +46,7 @@ const mongoClient = new MongoClient(MONGODB_URI, {
 
 let db;
 
-function cols() {
+function cols(){
   return {
     users: db.collection('user'),
     accounts: db.collection('account'),
@@ -57,7 +57,7 @@ function cols() {
   };
 }
 
-async function ensureIndexSafe(collection, keys, options = {}) {
+async function ensureIndexSafe(collection, keys, options = {}){
   try {
     await collection.createIndex(keys, options);
   } catch (err) {
@@ -72,7 +72,7 @@ async function ensureIndexSafe(collection, keys, options = {}) {
   }
 }
 
-async function initDatabase() {
+async function initDatabase(){
   await mongoClient.connect();
   db = mongoClient.db(MONGODB_DB_NAME);
 
@@ -84,7 +84,7 @@ async function initDatabase() {
     ensureIndexSafe(transactions, { stripeSessionId: 1 }, { unique: true, sparse: true }),
   ]);
 
-  if (ADMIN_EMAIL && ADMIN_PASSWORD) {
+  if (ADMIN_EMAIL && ADMIN_PASSWORD){
     const existingAdmin = await users.findOne({ email: ADMIN_EMAIL });
     if (!existingAdmin) {
       const now = new Date().toISOString();
